@@ -14,8 +14,19 @@ struct PersistenceController {
     static let preview: PersistenceController = {
         let result = PersistenceController(inMemory: true)
         let viewContext = result.container.viewContext
-        for _ in 0..<10 {
-            let newItem = Item(context: viewContext)
+        for index in 1...3 {
+            let phone = Phone(context: viewContext)
+            phone.id = Int16(index)
+            phone.brand = "Sample Brand"
+            phone.model = "Sample Model \(index)"
+
+            let camera = Camera(context: viewContext)
+            camera.id = Int16(index)
+            camera.focal_length_mm = 24
+            camera.aperture = 1.8
+            camera.crop_factor = 2
+            camera.resolution_mp = 12
+            camera.toPhone = phone
         }
         do {
             try viewContext.save()

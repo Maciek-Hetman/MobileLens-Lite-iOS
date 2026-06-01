@@ -1,10 +1,17 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="24901" systemVersion="25F71" minimumToolsVersion="Automatic" sourceLanguage="Swift" userDefinedModelVersionIdentifier="">
-    <entity name="Item" representedClassName="Item" syncable="YES" codeGenerationType="class">
+    <entity name="Camera" representedClassName="Camera" syncable="YES" codeGenerationType="class">
         <attribute name="aperture" optional="YES" attributeType="Float" defaultValueString="0.0" usesScalarValueType="YES"/>
         <attribute name="crop_factor" optional="YES" attributeType="Float" defaultValueString="0.0" usesScalarValueType="YES"/>
         <attribute name="focal_length_mm" optional="YES" attributeType="Float" defaultValueString="0.0" usesScalarValueType="YES"/>
         <attribute name="id" optional="YES" attributeType="Integer 16" defaultValueString="0" usesScalarValueType="YES"/>
         <attribute name="resolution_mp" optional="YES" attributeType="Float" defaultValueString="0.0" usesScalarValueType="YES"/>
+        <relationship name="toPhone" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="Phone" inverseName="toCamera" inverseEntity="Phone"/>
+    </entity>
+    <entity name="Phone" representedClassName="Phone" syncable="YES" codeGenerationType="class">
+        <attribute name="brand" optional="YES" attributeType="String"/>
+        <attribute name="id" optional="YES" attributeType="Integer 16" defaultValueString="0" usesScalarValueType="YES"/>
+        <attribute name="model" optional="YES" attributeType="String"/>
+        <relationship name="toCamera" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="Camera" inverseName="toPhone" inverseEntity="Camera"/>
     </entity>
 </model>

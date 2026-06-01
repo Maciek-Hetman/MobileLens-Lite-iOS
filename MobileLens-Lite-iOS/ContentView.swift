@@ -28,15 +28,11 @@ struct ContentView: View {
 struct UploadTabView: View {
     @State private var selectedItem: PhotosPickerItem? = nil
     @State private var selectedImageData: Data? = nil
-    @State private var savedItemID: Int16? = nil
+    @State private var savedCameraID: Int16? = nil
 
     var body: some View {
         NavigationStack {
             VStack(spacing: 20) {
-                Text("Upload a photo")
-                    .font(.title2)
-                    .fontWeight(.semibold)
-
                 Group {
                     if let selectedImageData,
                        let uiImage = UIImage(data: selectedImageData) {
@@ -69,8 +65,11 @@ struct UploadTabView: View {
                     selection: $selectedItem,
                     matching: .images,
                     photoLibrary: .shared()) {
-                        Text("Choose Photo")
-                            .frame(maxWidth: .infinity)
+                        HStack {
+                            Spacer()
+                            Label("Choose Photo", systemImage: "photo")
+                            Spacer()
+                        }
                     }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.large)
@@ -79,16 +78,22 @@ struct UploadTabView: View {
                         Task {
                             if let data = try? await newValue.loadTransferable(type: Data.self) {
                                 selectedImageData = data
-                                savedItemID = nil
+                                savedCameraID = nil
                             }
                         }
                     }
 
                 NavigationLink {
-                    ExifDataView(imageData: selectedImageData, savedItemID: $savedItemID)
+                    ExifDataView(imageData: selectedImageData, savedCameraID: $savedCameraID, onSaveComplete: {
+                        selectedImageData = nil
+                        selectedItem = nil
+                    })
                 } label: {
-                    Text("View EXIF Data")
-                        .frame(maxWidth: .infinity)
+                    HStack {
+                        Spacer()
+                        Label("View EXIF Data", systemImage: "info.circle")
+                        Spacer()
+                    }
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.large)
@@ -97,54 +102,91 @@ struct UploadTabView: View {
                 Spacer()
             }
             .padding()
+            .appBarTitle("Upload")
         }
     }
 }
 
 struct DatabaseTabView: View {
+    @Environment(\.managedObjectContext) private var viewContext
+
     @FetchRequest(
-        sortDescriptors: [NSSortDescriptor(keyPath: \Item.id, ascending: true)],
+        sortDescriptors: [NSSortDescriptor(keyPath: \Camera.id, ascending: true)],
         animation: .default)
-    private var items: FetchedResults<Item>
+    private var cameras: FetchedResults<Camera>
 
     var body: some View {
         NavigationStack {
             Group {
-                if items.isEmpty {
+                if cameras.isEmpty {
                     VStack(spacing: 16) {
                         Image(systemName: "tray.full")
                             .font(.system(size: 48))
                             .foregroundStyle(.secondary)
-                        Text("Database")
-                            .font(.title2)
-                            .fontWeight(.semibold)
                         Text("Your saved items will appear here.")
                             .foregroundStyle(.secondary)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .padding()
                 } else {
-                    List(items) { item in
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Item \(item.id)")
-                                .font(.headline)
-                            Text("Focal length: \(Double(item.focal_length_mm).formattedExifValue) mm")
-                            Text("Aperture: f/\(Double(item.aperture).formattedExifValue)")
-                            Text("Crop factor: \(Double(item.crop_factor).formattedExifValue)")
-                            Text("Resolution: \(Double(item.resolution_mp).formattedExifValue) MP")
+                    List {
+                        ForEach(cameras) { camera in
+                            NavigationLink {
+                                ExifDataView(imageData: nil, savedCameraID: .constant(camera.id), onSaveComplete: { })
+                            } label: {
+                                VStack(alignment: .leading, spacing: 6) {
+                                    Text(camera.toPhone?.brand ?? "Not provided")
+                                        .font(.headline)
+                                    Text(camera.toPhone?.model ?? "Not provided")
+                                        .font(.subheadline)
+                                        .foregroundStyle(.secondary)
+                                }
+                                .padding(.vertical, 4)
+                            }
                         }
-                        .font(.subheadline)
-                        .padding(.vertical, 4)
+                        .onDelete(perform: deleteCameras)
                     }
                 }
             }
-            .navigationTitle("Database")
+            .appBarTitle("Database")
         }
+    }
+
+    private func deleteCameras(offsets: IndexSet) {
+        offsets.map { cameras[$0] }.forEach { camera in
+            let phone = camera.toPhone
+            viewContext.delete(camera)
+
+            if let phone, !hasOtherCameras(for: phone, excluding: camera) {
+                viewContext.delete(phone)
+            }
+        }
+
+        do {
+            try viewContext.save()
+        } catch {
+            viewContext.rollback()
+        }
+    }
+
+    private func hasOtherCameras(for phone: Phone, excluding camera: Camera) -> Bool {
+        let request = NSFetchRequest<Camera>(entityName: "Camera")
+        request.predicate = NSPredicate(format: "toPhone == %@ AND self != %@", phone, camera)
+        request.fetchLimit = 1
+
+        return ((try? viewContext.count(for: request)) ?? 0) > 0
     }
 }
 
 private extension Double {
     var formattedExifValue: String {
         formatted(.number.precision(.fractionLength(0...2)))
+    }
+}
+
+extension View {
+    func appBarTitle(_ title: String) -> some View {
+        navigationTitle(title)
+            .navigationBarTitleDisplayMode(.large)
     }
 }

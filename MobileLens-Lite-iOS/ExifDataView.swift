@@ -13,8 +13,12 @@ struct ExifDataView: View {
     @Environment(\.managedObjectContext) private var viewContext
 
     let imageData: Data?
-    @Binding var savedItemID: Int16?
+    @Binding var savedCameraID: Int16?
+    let onSaveComplete: () -> Void
 
+    @State private var isShowingSaveDetails = false
+    @State private var brand = ""
+    @State private var model = ""
     @State private var saveErrorMessage: String?
 
     private var mappedData: ExifMappedData? {
@@ -22,11 +26,11 @@ struct ExifDataView: View {
         return ExifReader.mappedData(from: imageData)
     }
 
-    private var savedItem: Item? {
-        guard let savedItemID else { return nil }
+    private var savedCamera: Camera? {
+        guard let savedCameraID else { return nil }
 
-        let request = NSFetchRequest<Item>(entityName: "Item")
-        request.predicate = NSPredicate(format: "id == %d", savedItemID)
+        let request = NSFetchRequest<Camera>(entityName: "Camera")
+        request.predicate = NSPredicate(format: "id == %d", savedCameraID)
         request.fetchLimit = 1
 
         return try? viewContext.fetch(request).first
@@ -34,34 +38,24 @@ struct ExifDataView: View {
 
     var body: some View {
         List {
-            if let mappedData {
-                if let savedItem {
-                    ExifRow(name: "Focal Length", value: "\(Double(savedItem.focal_length_mm).formattedExifValue) mm")
-                    ExifRow(name: "Aperture", value: "f/\(Double(savedItem.aperture).formattedExifValue)")
-                    ExifRow(name: "Resolution", value: "\(Double(savedItem.resolution_mp).formattedExifValue) MP")
-                    ExifRow(name: "Crop Factor", value: Double(savedItem.crop_factor).formattedExifValue)
-                    ExifRow(name: "35mm Equivalent Focal Length", value: "\(mappedData.focalLengthIn35mmFilm.formattedExifValue) mm")
-                    ExifRow(name: "35mm Equivalent Aperture", value: "f/\(mappedData.aperture35mmEquivalent.formattedExifValue)")
-                } else {
-                    ExifRow(name: "Focal Length", value: "\(mappedData.focalLength.formattedExifValue) mm")
-                    ExifRow(name: "Aperture", value: "f/\(mappedData.fNumber.formattedExifValue)")
-                    ExifRow(name: "Resolution", value: "\(mappedData.resolutionMegapixels.formattedExifValue) MP")
-                    ExifRow(name: "Crop Factor", value: mappedData.cropFactor.formattedExifValue)
-                    ExifRow(name: "35mm Equivalent Focal Length", value: "\(mappedData.focalLengthIn35mmFilm.formattedExifValue) mm")
-                    ExifRow(name: "35mm Equivalent Aperture", value: "f/\(mappedData.aperture35mmEquivalent.formattedExifValue)")
-                }
-
-                if savedItemID != nil {
-                    Section {
-                        Label("Saved to database", systemImage: "checkmark.circle")
-                            .foregroundStyle(.green)
-                    }
-                } else if let saveErrorMessage {
-                    Section {
-                        Label(saveErrorMessage, systemImage: "exclamationmark.triangle")
-                            .foregroundStyle(.red)
-                    }
-                }
+            if let savedCamera {
+                ExifRow(name: "Brand", value: savedCamera.toPhone?.brand ?? "Not provided")
+                ExifRow(name: "Model", value: savedCamera.toPhone?.model ?? "Not provided")
+                ExifRow(name: "Focal Length", value: "\(Double(savedCamera.focal_length_mm).formattedExifValue) mm")
+                ExifRow(name: "Aperture", value: "f/\(Double(savedCamera.aperture).formattedExifValue)")
+                ExifRow(name: "Resolution", value: "\(Double(savedCamera.resolution_mp).formattedExifValue) MP")
+                ExifRow(name: "Crop Factor", value: Double(savedCamera.crop_factor).formattedExifValue)
+                ExifRow(name: "35mm Equivalent Focal Length", value: "\(savedCamera.equivalentFocalLength.formattedExifValue) mm")
+                ExifRow(name: "35mm Equivalent Aperture", value: "f/\(savedCamera.equivalentAperture.formattedExifValue)")
+            } else if let mappedData {
+                ExifRow(name: "Brand", value: "Not saved yet")
+                ExifRow(name: "Model", value: "Not saved yet")
+                ExifRow(name: "Focal Length", value: "\(mappedData.focalLength.formattedExifValue) mm")
+                ExifRow(name: "Aperture", value: "f/\(mappedData.fNumber.formattedExifValue)")
+                ExifRow(name: "Resolution", value: "\(mappedData.resolutionMegapixels.formattedExifValue) MP")
+                ExifRow(name: "Crop Factor", value: mappedData.cropFactor.formattedExifValue)
+                ExifRow(name: "35mm Equivalent Focal Length", value: "\(mappedData.focalLengthIn35mmFilm.formattedExifValue) mm")
+                ExifRow(name: "35mm Equivalent Aperture", value: "f/\(mappedData.aperture35mmEquivalent.formattedExifValue)")
             } else {
                 ContentUnavailableView(
                     "No EXIF Data",
@@ -70,43 +64,121 @@ struct ExifDataView: View {
                 )
             }
         }
-        .navigationTitle("EXIF Data")
-        .navigationBarTitleDisplayMode(.inline)
-        .onAppear {
-            saveMappedItemIfNeeded()
+        .appBarTitle("EXIF Data")
+        .safeAreaInset(edge: .bottom) {
+            if mappedData != nil, savedCamera == nil {
+                VStack(spacing: 8) {
+                    Button {
+                        isShowingSaveDetails = true
+                    } label: {
+                        HStack {
+                            Spacer()
+                            Label("Save to Database", systemImage: "tray.and.arrow.down")
+                            Spacer()
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+
+                    if let saveErrorMessage {
+                        Label(saveErrorMessage, systemImage: "exclamationmark.triangle")
+                            .font(.footnote)
+                            .foregroundStyle(.red)
+                    }
+                }
+                .padding()
+                .background(.bar)
+            }
+        }
+        .alert("Save Lens Details", isPresented: $isShowingSaveDetails) {
+            TextField("Brand", text: $brand)
+            TextField("Model", text: $model)
+            Button("Cancel", role: .cancel) { }
+            Button("Save") {
+                saveMappedItem()
+            }
+        } message: {
+            Text("Enter the brand and model before saving this photo data.")
         }
     }
 
-    private func saveMappedItemIfNeeded() {
-        guard savedItemID == nil, let mappedData else { return }
+    private func saveMappedItem() {
+        guard savedCameraID == nil, let mappedData else { return }
+        saveErrorMessage = nil
 
-        let item = Item(context: viewContext)
-        let itemID = nextItemID()
-        item.id = itemID
-        item.focal_length_mm = Float(mappedData.focalLength)
-        item.crop_factor = Float(mappedData.cropFactor)
-        item.aperture = Float(mappedData.fNumber)
-        item.resolution_mp = Float(mappedData.resolutionMegapixels)
+        let phone = existingPhone(brand: brand, model: model) ?? newPhone(brand: brand, model: model)
+
+        let camera = Camera(context: viewContext)
+        let cameraID = nextCameraID()
+        camera.id = cameraID
+        camera.focal_length_mm = Float(mappedData.focalLength)
+        camera.crop_factor = Float(mappedData.cropFactor)
+        camera.aperture = Float(mappedData.fNumber)
+        camera.resolution_mp = Float(mappedData.resolutionMegapixels)
+        camera.toPhone = phone
 
         do {
             try viewContext.save()
-            savedItemID = itemID
+            savedCameraID = cameraID
+            onSaveComplete()
         } catch {
             viewContext.rollback()
             saveErrorMessage = "Could not save EXIF data"
         }
     }
 
-    private func nextItemID() -> Int16 {
-        let request = NSFetchRequest<Item>(entityName: "Item")
+    private func existingPhone(brand: String, model: String) -> Phone? {
+        guard let trimmedBrand = trimmedOptional(brand),
+              let trimmedModel = trimmedOptional(model) else {
+            return nil
+        }
+
+        let request = NSFetchRequest<Phone>(entityName: "Phone")
+        request.predicate = NSPredicate(
+            format: "brand ==[c] %@ AND model ==[c] %@",
+            trimmedBrand,
+            trimmedModel
+        )
+        request.fetchLimit = 1
+
+        return try? viewContext.fetch(request).first
+    }
+
+    private func newPhone(brand: String, model: String) -> Phone {
+        let phone = Phone(context: viewContext)
+        phone.id = nextPhoneID()
+        phone.brand = trimmedOptional(brand)
+        phone.model = trimmedOptional(model)
+        return phone
+    }
+
+    private func trimmedOptional(_ value: String) -> String? {
+        let trimmedValue = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmedValue.isEmpty ? nil : trimmedValue
+    }
+
+    private func nextCameraID() -> Int16 {
+        let request = NSFetchRequest<Camera>(entityName: "Camera")
         request.sortDescriptors = [NSSortDescriptor(key: "id", ascending: false)]
         request.fetchLimit = 1
 
-        guard let lastItem = try? viewContext.fetch(request).first else {
+        guard let lastCamera = try? viewContext.fetch(request).first else {
             return 1
         }
 
-        return lastItem.id + 1
+        return lastCamera.id + 1
+    }
+
+    private func nextPhoneID() -> Int16 {
+        let request = NSFetchRequest<Phone>(entityName: "Phone")
+        request.sortDescriptors = [NSSortDescriptor(key: "id", ascending: false)]
+        request.fetchLimit = 1
+
+        guard let lastPhone = try? viewContext.fetch(request).first else {
+            return 1
+        }
+
+        return lastPhone.id + 1
     }
 }
 
@@ -199,6 +271,16 @@ enum ExifReader {
         }
 
         return nil
+    }
+}
+
+private extension Camera {
+    var equivalentFocalLength: Double {
+        Double(focal_length_mm * crop_factor)
+    }
+
+    var equivalentAperture: Double {
+        Double(aperture * crop_factor)
     }
 }
 
