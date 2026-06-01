@@ -28,6 +28,7 @@ struct ContentView: View {
 struct UploadTabView: View {
     @State private var selectedItem: PhotosPickerItem? = nil
     @State private var selectedImageData: Data? = nil
+    @State private var savedItemID: Int16? = nil
 
     var body: some View {
         NavigationStack {
@@ -78,12 +79,13 @@ struct UploadTabView: View {
                         Task {
                             if let data = try? await newValue.loadTransferable(type: Data.self) {
                                 selectedImageData = data
+                                savedItemID = nil
                             }
                         }
                     }
 
                 NavigationLink {
-                    ExifDataView(imageData: selectedImageData)
+                    ExifDataView(imageData: selectedImageData, savedItemID: $savedItemID)
                 } label: {
                     Text("View EXIF Data")
                         .frame(maxWidth: .infinity)
@@ -100,18 +102,49 @@ struct UploadTabView: View {
 }
 
 struct DatabaseTabView: View {
+    @FetchRequest(
+        sortDescriptors: [NSSortDescriptor(keyPath: \Item.id, ascending: true)],
+        animation: .default)
+    private var items: FetchedResults<Item>
+
     var body: some View {
-        VStack(spacing: 16) {
-            Image(systemName: "tray.full")
-                .font(.system(size: 48))
-                .foregroundStyle(.secondary)
-            Text("Database")
-                .font(.title2)
-                .fontWeight(.semibold)
-            Text("Your saved items will appear here.")
-                .foregroundStyle(.secondary)
+        NavigationStack {
+            Group {
+                if items.isEmpty {
+                    VStack(spacing: 16) {
+                        Image(systemName: "tray.full")
+                            .font(.system(size: 48))
+                            .foregroundStyle(.secondary)
+                        Text("Database")
+                            .font(.title2)
+                            .fontWeight(.semibold)
+                        Text("Your saved items will appear here.")
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .padding()
+                } else {
+                    List(items) { item in
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Item \(item.id)")
+                                .font(.headline)
+                            Text("Focal length: \(Double(item.focal_length_mm).formattedExifValue) mm")
+                            Text("Aperture: f/\(Double(item.aperture).formattedExifValue)")
+                            Text("Crop factor: \(Double(item.crop_factor).formattedExifValue)")
+                            Text("Resolution: \(Double(item.resolution_mp).formattedExifValue) MP")
+                        }
+                        .font(.subheadline)
+                        .padding(.vertical, 4)
+                    }
+                }
+            }
+            .navigationTitle("Database")
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding()
+    }
+}
+
+private extension Double {
+    var formattedExifValue: String {
+        formatted(.number.precision(.fractionLength(0...2)))
     }
 }
