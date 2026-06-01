@@ -7,76 +7,111 @@
 
 import SwiftUI
 import CoreData
+import PhotosUI
 
 struct ContentView: View {
-    @Environment(\.managedObjectContext) private var viewContext
-
-    @FetchRequest(
-        sortDescriptors: [NSSortDescriptor(keyPath: \Item.timestamp, ascending: true)],
-        animation: .default)
-    private var items: FetchedResults<Item>
-
     var body: some View {
-        NavigationView {
-            List {
-                ForEach(items) { item in
-                    NavigationLink {
-                        Text("Item at \(item.timestamp!, formatter: itemFormatter)")
-                    } label: {
-                        Text(item.timestamp!, formatter: itemFormatter)
-                    }
+        TabView {
+            UploadTabView()
+                .tabItem {
+                    Label("Upload", systemImage: "square.and.arrow.up")
                 }
-                .onDelete(perform: deleteItems)
-            }
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    EditButton()
+
+            DatabaseTabView()
+                .tabItem {
+                    Label("Database", systemImage: "tray.full")
                 }
-                ToolbarItem {
-                    Button(action: addItem) {
-                        Label("Add Item", systemImage: "plus")
-                    }
-                }
-            }
-            Text("Select an item")
-        }
-    }
-
-    private func addItem() {
-        withAnimation {
-            let newItem = Item(context: viewContext)
-            newItem.timestamp = Date()
-
-            do {
-                try viewContext.save()
-            } catch {
-                let nsError = error as NSError
-                fatalError("Unresolved error \(nsError), \(nsError.userInfo)")
-            }
-        }
-    }
-
-    private func deleteItems(offsets: IndexSet) {
-        withAnimation {
-            offsets.map { items[$0] }.forEach(viewContext.delete)
-
-            do {
-                try viewContext.save()
-            } catch {
-                let nsError = error as NSError
-                fatalError("Unresolved error \(nsError), \(nsError.userInfo)")
-            }
         }
     }
 }
 
-private let itemFormatter: DateFormatter = {
-    let formatter = DateFormatter()
-    formatter.dateStyle = .short
-    formatter.timeStyle = .medium
-    return formatter
-}()
+struct UploadTabView: View {
+    @State private var selectedItem: PhotosPickerItem? = nil
+    @State private var selectedImageData: Data? = nil
 
-#Preview {
-    ContentView().environment(\.managedObjectContext, PersistenceController.preview.container.viewContext)
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 20) {
+                Text("Upload a photo")
+                    .font(.title2)
+                    .fontWeight(.semibold)
+
+                Group {
+                    if let selectedImageData,
+                       let uiImage = UIImage(data: selectedImageData) {
+                        Image(uiImage: uiImage)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(maxHeight: 320)
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                            .shadow(radius: 4)
+                    } else {
+                        ZStack {
+                            RoundedRectangle(cornerRadius: 12)
+                                .stroke(style: StrokeStyle(lineWidth: 2, dash: [8]))
+                                .foregroundStyle(.secondary)
+                            VStack(spacing: 8) {
+                                Image(systemName: "photo.on.rectangle")
+                                    .font(.system(size: 40))
+                                    .foregroundStyle(.secondary)
+                                Text("No photo selected")
+                                    .foregroundStyle(.secondary)
+                            }
+                            .padding()
+                        }
+                        .frame(maxHeight: 320)
+                    }
+                }
+                .frame(maxWidth: .infinity)
+
+                PhotosPicker(
+                    selection: $selectedItem,
+                    matching: .images,
+                    photoLibrary: .shared()) {
+                        Text("Choose Photo")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                    .onChange(of: selectedItem) { oldValue, newValue in
+                        guard let newValue else { return }
+                        Task {
+                            if let data = try? await newValue.loadTransferable(type: Data.self) {
+                                selectedImageData = data
+                            }
+                        }
+                    }
+
+                NavigationLink {
+                    ExifDataView(imageData: selectedImageData)
+                } label: {
+                    Text("View EXIF Data")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.large)
+                .disabled(selectedImageData == nil)
+
+                Spacer()
+            }
+            .padding()
+        }
+    }
+}
+
+struct DatabaseTabView: View {
+    var body: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "tray.full")
+                .font(.system(size: 48))
+                .foregroundStyle(.secondary)
+            Text("Database")
+                .font(.title2)
+                .fontWeight(.semibold)
+            Text("Your saved items will appear here.")
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding()
+    }
 }
