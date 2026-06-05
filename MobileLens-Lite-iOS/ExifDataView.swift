@@ -11,15 +11,26 @@ import CoreData
 
 struct ExifDataView: View {
     @Environment(\.managedObjectContext) private var viewContext
+    @Environment(\.dismiss) private var dismiss
 
     let imageData: Data?
     @Binding var savedCameraID: Int16?
     let onSaveComplete: () -> Void
 
     @State private var isShowingSaveDetails = false
+    @State private var isShowingEditDetails = false
+    @State private var isShowingDeleteConfirmation = false
     @State private var brand = ""
     @State private var model = ""
+    @State private var editBrand = ""
+    @State private var editModel = ""
+    @State private var editFocalLength = ""
+    @State private var editAperture = ""
+    @State private var editResolution = ""
+    @State private var editCropFactor = ""
     @State private var saveErrorMessage: String?
+    @State private var editErrorMessage: String?
+    @State private var deleteErrorMessage: String?
 
     private var mappedData: ExifMappedData? {
         guard let imageData else { return nil }
@@ -66,7 +77,50 @@ struct ExifDataView: View {
         }
         .appBarTitle("EXIF Data")
         .safeAreaInset(edge: .bottom) {
-            if mappedData != nil, savedCamera == nil {
+            if let savedCamera {
+                VStack(spacing: 8) {
+                    HStack(spacing: 12) {
+                        Button {
+                            prepareEditDetails(for: savedCamera)
+                            isShowingEditDetails = true
+                        } label: {
+                            HStack {
+                                Spacer()
+                                Label("Edit Entry", systemImage: "pencil")
+                                Spacer()
+                            }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.large)
+
+                        Button(role: .destructive) {
+                            isShowingDeleteConfirmation = true
+                        } label: {
+                            HStack {
+                                Spacer()
+                                Label("Delete", systemImage: "trash")
+                                Spacer()
+                            }
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.large)
+                    }
+
+                    if let editErrorMessage {
+                        Label(editErrorMessage, systemImage: "exclamationmark.triangle")
+                            .font(.footnote)
+                            .foregroundStyle(.red)
+                    }
+
+                    if let deleteErrorMessage {
+                        Label(deleteErrorMessage, systemImage: "exclamationmark.triangle")
+                            .font(.footnote)
+                            .foregroundStyle(.red)
+                    }
+                }
+                .padding()
+                .background(.bar)
+            } else if mappedData != nil {
                 VStack(spacing: 8) {
                     Button {
                         isShowingSaveDetails = true
@@ -100,6 +154,77 @@ struct ExifDataView: View {
         } message: {
             Text("Enter the brand and model before saving this photo data.")
         }
+        .sheet(isPresented: $isShowingEditDetails) {
+            NavigationStack {
+                Form {
+                    Section("Phone") {
+                        LabeledContent("Brand") {
+                            TextField("Not provided", text: $editBrand)
+                                .multilineTextAlignment(.trailing)
+                        }
+                        LabeledContent("Model") {
+                            TextField("Not provided", text: $editModel)
+                                .multilineTextAlignment(.trailing)
+                        }
+                    }
+
+                    Section("Lens Data") {
+                        LabeledContent("Focal Length (mm)") {
+                            TextField("0", text: $editFocalLength)
+                                .keyboardType(.decimalPad)
+                                .multilineTextAlignment(.trailing)
+                        }
+                        LabeledContent("Aperture (f-number)") {
+                            TextField("0", text: $editAperture)
+                                .keyboardType(.decimalPad)
+                                .multilineTextAlignment(.trailing)
+                        }
+                        LabeledContent("Resolution (MP)") {
+                            TextField("0", text: $editResolution)
+                                .keyboardType(.decimalPad)
+                                .multilineTextAlignment(.trailing)
+                        }
+                        LabeledContent("Crop Factor (x)") {
+                            TextField("0", text: $editCropFactor)
+                                .keyboardType(.decimalPad)
+                                .multilineTextAlignment(.trailing)
+                        }
+                    }
+
+                    if let editErrorMessage {
+                        Label(editErrorMessage, systemImage: "exclamationmark.triangle")
+                            .foregroundStyle(.red)
+                    }
+                }
+                .appBarTitle("Edit Entry")
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Cancel") {
+                            editErrorMessage = nil
+                            isShowingEditDetails = false
+                        }
+                    }
+
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Save") {
+                            updateSavedItem()
+                        }
+                    }
+                }
+            }
+        }
+        .confirmationDialog(
+            "Delete Entry?",
+            isPresented: $isShowingDeleteConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Delete Entry", role: .destructive) {
+                deleteSavedItem()
+            }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("This saved EXIF entry will be removed from the database.")
+        }
     }
 
     private func saveMappedItem() {
@@ -124,6 +249,75 @@ struct ExifDataView: View {
         } catch {
             viewContext.rollback()
             saveErrorMessage = "Could not save EXIF data"
+        }
+    }
+
+    private func prepareEditDetails(for camera: Camera) {
+        editErrorMessage = nil
+        deleteErrorMessage = nil
+        editBrand = camera.toPhone?.brand ?? ""
+        editModel = camera.toPhone?.model ?? ""
+        editFocalLength = Double(camera.focal_length_mm).formattedExifValue
+        editAperture = Double(camera.aperture).formattedExifValue
+        editResolution = Double(camera.resolution_mp).formattedExifValue
+        editCropFactor = Double(camera.crop_factor).formattedExifValue
+    }
+
+    private func updateSavedItem() {
+        guard let savedCamera else { return }
+
+        editErrorMessage = nil
+
+        guard let focalLength = positiveDouble(from: editFocalLength),
+              let aperture = positiveDouble(from: editAperture),
+              let resolution = positiveDouble(from: editResolution),
+              let cropFactor = positiveDouble(from: editCropFactor) else {
+            editErrorMessage = "Enter positive numbers for all lens data."
+            return
+        }
+
+        let oldPhone = savedCamera.toPhone
+        let updatedPhone = existingPhone(brand: editBrand, model: editModel) ?? newPhone(brand: editBrand, model: editModel)
+
+        savedCamera.focal_length_mm = Float(focalLength)
+        savedCamera.aperture = Float(aperture)
+        savedCamera.resolution_mp = Float(resolution)
+        savedCamera.crop_factor = Float(cropFactor)
+        savedCamera.toPhone = updatedPhone
+
+        if let oldPhone, oldPhone != updatedPhone, !hasOtherCameras(for: oldPhone, excluding: savedCamera) {
+            viewContext.delete(oldPhone)
+        }
+
+        do {
+            try viewContext.save()
+            isShowingEditDetails = false
+            onSaveComplete()
+        } catch {
+            viewContext.rollback()
+            editErrorMessage = "Could not update entry"
+        }
+    }
+
+    private func deleteSavedItem() {
+        guard let savedCamera else { return }
+
+        deleteErrorMessage = nil
+        let phone = savedCamera.toPhone
+        viewContext.delete(savedCamera)
+
+        if let phone, !hasOtherCameras(for: phone, excluding: savedCamera) {
+            viewContext.delete(phone)
+        }
+
+        do {
+            try viewContext.save()
+            savedCameraID = nil
+            onSaveComplete()
+            dismiss()
+        } catch {
+            viewContext.rollback()
+            deleteErrorMessage = "Could not delete entry"
         }
     }
 
@@ -155,6 +349,25 @@ struct ExifDataView: View {
     private func trimmedOptional(_ value: String) -> String? {
         let trimmedValue = value.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmedValue.isEmpty ? nil : trimmedValue
+    }
+
+    private func positiveDouble(from value: String) -> Double? {
+        let trimmedValue = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: ",", with: ".")
+
+        guard let number = Double(trimmedValue), number > 0 else {
+            return nil
+        }
+
+        return number
+    }
+
+    private func hasOtherCameras(for phone: Phone, excluding camera: Camera) -> Bool {
+        let request = NSFetchRequest<Camera>(entityName: "Camera")
+        request.predicate = NSPredicate(format: "toPhone == %@ AND self != %@", phone, camera)
+        request.fetchLimit = 1
+
+        return ((try? viewContext.count(for: request)) ?? 0) > 0
     }
 
     private func nextCameraID() -> Int16 {
